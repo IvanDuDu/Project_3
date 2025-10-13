@@ -1,6 +1,6 @@
 # _Điều khiển CAM_
 
-1. CAM_sensorRead.hpp/cpp - Quản lý Sensors
+### 1. CAM_sensorRead.hpp/cpp - Quản lý Sensors
 Vai trò: Điều khiển tất cả sensors hardware
 Classes:
 
@@ -28,7 +28,7 @@ void returnFrameBuffer(camera_fb_t* fb)
 // Manager
 esp_err_t initAll()  // Init tất cả sensors
 
-2. CAM_memorFunc.hpp/cpp - Quản lý SD Card & Video
+### 2. CAM_memorFunc.hpp/cpp - Quản lý SD Card & Video
 Vai trò: Lưu trữ và quản lý video trên SD Card
 Classes:
 
@@ -63,7 +63,7 @@ Cấu trúc lưu trữ:
 └── 20250110143022/
     └── ...
 
-3. HTTPStream.hpp/cpp - HTTP MJPEG Streaming
+### 3. HTTPStream.hpp/cpp - HTTP MJPEG Streaming
 Vai trò: Stream video realtime qua HTTP
 Classes:
 
@@ -79,7 +79,7 @@ http://[ESP32_IP]/stream - MJPEG stream
 
 Format: Multipart/x-mixed-replace (MJPEG)
 
-4. CAM_mqttApi.hpp/cpp - MQTT API Controller
+### 4. CAM_mqttApi.hpp/cpp - MQTT API Controller
 Vai trò: Điều khiển Stream và Memory Upload qua MQTT
 Classes:
 
@@ -116,56 +116,12 @@ Publish:
 - api/{token}/cam/stream/status  → Gửi ON/OFF/BUSY
 - api/{token}/cam/memory/status  → Gửi ESP_OK/ESP_FAIL/BUSY
 
-5. CAM_WiFi_NVS.hpp/cpp - WiFi & BLE Provisioning
-Vai trò: Kết nối WiFi, lưu credentials, BLE provisioning
-Classes:
-
-NvsManager - Lưu/Đọc credentials từ NVS
-BleProvisioningManager - BLE provisioning (pair với mobile app)
-WiFiConnectionManager - Quản lý WiFi connection
-
-Chức năng chính:
-cpp// NVS
-esp_err_t saveCredentials(const WiFiCredentials& creds)
-esp_err_t loadCredentials(WiFiCredentials& creds)
-bool hasCredentials()
-
-// BLE Provisioning
-esp_err_t start()  // Bật BLE advertising
-esp_err_t sendAck()  // Gửi ACK về mobile app
-
-// WiFi Manager
-esp_err_t start()  // Auto: Load NVS → Connect WiFi HOẶC BLE provisioning
-WiFiState getState()
-Logic WiFi:
-
-Check NVS có credentials không?
-
-YES → Connect WiFi
-NO → Bật BLE provisioning
+### 5. CAM_WiFi_NVS.hpp/cpp - WiFi & BLE Provisioning
 
 
-BLE nhận: <ssid>//<password>//<token>
-Parse và lưu vào NVS
-Connect WiFi
-Gửi ACK về mobile app qua BLE
-Publish "active" qua MQTT
-Monitor WiFi → Nếu mất kết nối → Publish "inactive"
 
+### 6. main.cpp - Entry Point
 
-6. main.cpp - Entry Point
-Vai trò: Khởi tạo và điều phối tất cả components
-Sequence khởi tạo:
-
-Init WiFi (NVS + BLE provisioning nếu cần)
-Init Sensors (PIR, RTC, Camera)
-Init SD Card
-Init Video Manager
-Init Write Timer
-Init Stream Manager
-Init HTTP Server
-Init MQTT API
-Create tasks (PIR monitor, System monitor)
 
 ```
 🔄 Luồng hoạt động (Flow Diagram)

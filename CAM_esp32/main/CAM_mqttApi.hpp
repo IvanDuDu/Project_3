@@ -49,6 +49,7 @@ private:
     std::string topicMemorySub;
     std::string topicMemoryPub;
     std::string topicWiFiPub;
+    std::string topicSendFolderName;
     
     // Memory task data
     std::string memoryVideoPath;
@@ -93,6 +94,14 @@ public:
     // Disable copy
     MqttApiManager(const MqttApiManager&) = delete;
     MqttApiManager& operator=(const MqttApiManager&) = delete;
+
+    const std::string& getDeviceToken() const { return deviceToken; }
+    const std::string& getTopicWiFiPub() const { return topicWiFiPub; }
+    const std::string& getTopicStreamPub() const { return topicStreamPub; }
+    const std::string& getTopicMemoryPub() const { return topicMemoryPub; }
+    const std::string& getTopicStreamSub() const { return topicStreamSub; }
+    const std::string& getTopicMemorySub() const { return topicMemorySub; }
+    const std::string& getTopicSendFolderName() const { return topicSendFolderName; }
     
     // MQTT connection
     esp_err_t connect();
@@ -107,8 +116,8 @@ public:
     esp_err_t startMemoryRead(const std::string& videoPath);
     
     // Publish status
-    esp_err_t publishStreamStatus(const std::string& status);
-    esp_err_t publishMemoryStatus(const std::string& status);
+    esp_err_t publishStatus(const std::string& status, const std::string& topic = "");
+    esp_err_t publishFolderName(const std::string& folderName);
     
     // Write video control
     bool canWriteVideo() const;
@@ -120,6 +129,7 @@ public:
     TaskState getStreamState() const;
     TaskState getMemoryState() const;
     TaskState getWriteState() const;
+
 };
 
 #endif // CAM_MQTT_API_HPP

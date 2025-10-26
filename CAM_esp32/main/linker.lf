@@ -1,0 +1,4 @@
+[mapping:my_mapping]
+archive: libmain.a
+entries:
+    * (noflash)

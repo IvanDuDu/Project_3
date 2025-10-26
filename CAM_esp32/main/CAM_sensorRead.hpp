@@ -2,10 +2,12 @@
 #define CAM_SENSOR_READ_HPP
 
 #include "driver/gpio.h"
-#include "driver/i2c.h"
+#include "driver/i2c_master.h"
 #include "esp_camera.h"
 #include "esp_err.h"
 #include "esp_log.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #include <cstdint>
 
 // RTC Time structure
@@ -44,12 +46,16 @@ private:
     gpio_num_t sda_pin;
     uint8_t device_address;
     
+    // I2C Master API handles
+    i2c_master_bus_handle_t bus_handle;
+    i2c_master_dev_handle_t dev_handle;
+    
     static uint8_t bcdToDec(uint8_t val);
     static uint8_t decToBcd(uint8_t val);
     
 public:
-    RtcDS3231(gpio_num_t scl = GPIO_NUM_14, 
-              gpio_num_t sda = GPIO_NUM_15,
+    RtcDS3231(gpio_num_t scl = GPIO_NUM_16, 
+              gpio_num_t sda = GPIO_NUM_17,
               i2c_port_t port = I2C_NUM_0);
     ~RtcDS3231();
     

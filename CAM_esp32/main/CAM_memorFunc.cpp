@@ -12,6 +12,7 @@
 #include <cstring>
 #include <ctime>
 
+
 const char* SdCardManager::TAG = "SD_CARD";
 const char* VideoManager::TAG = "VIDEO_MGR";
 const char* VideoWriteTimer::TAG = "WRITE_TIMER";
@@ -20,7 +21,7 @@ const char* VideoWriteTimer::TAG = "WRITE_TIMER";
 
 namespace RtcTimeUtils {
     std::string toFolderName(const RtcTime& time) {
-        char buf[15];
+        char buf[32];
         snprintf(buf, sizeof(buf), "%04d%02d%02d%02d%02d%02d",
                  time.year, time.month, time.day, 
                  time.hour, time.minute, time.second);
@@ -124,15 +125,15 @@ void SdCardManager::printInfo() const {
     
     ESP_LOGI(TAG, "=== SD Card Info ===");
     ESP_LOGI(TAG, "Name: %s", card->cid.name);
-    ESP_LOGI(TAG, "Speed: %d kHz", card->max_freq_khz);
+    ESP_LOGI(TAG, "Speed: %lu kHz", card->max_freq_khz);
     ESP_LOGI(TAG, "Size: %llu MB", 
              ((uint64_t)card->csd.capacity) * card->csd.sector_size / (1024 * 1024));
     
-    uint64_t total, free;
-    if (getInfo(total, free) == ESP_OK) {
-        ESP_LOGI(TAG, "Free: %llu MB / %llu MB", 
-                 free / (1024 * 1024), total / (1024 * 1024));
-    }
+    //uint64_t total, free;
+    // if (getInfo(total, free) == ESP_OK) {
+    //     ESP_LOGI(TAG, "Free: %llu MB / %llu MB", 
+    //              free / (1024 * 1024), total / (1024 * 1024));
+    // }
 }
 
 // ==================== Video Write Timer ====================
@@ -305,8 +306,11 @@ void VideoWriteTimer::writeTaskFunc(void* param) {
     );
     
     if (ret == ESP_OK) {
-        ESP_LOGI(TAG, "Video written: %s (%u frames, %u bytes)",
+        ESP_LOGI(TAG, "Video written: %s (%lu frames, %lu bytes)",
                  info.folderName.c_str(), info.frameCount, info.totalSize);
+        if(self->onVideoComplete) {
+            self->onVideoComplete(info.folderName);
+        }
     } else {
         ESP_LOGE(TAG, "Video write failed");
     }
@@ -390,12 +394,12 @@ esp_err_t VideoManager::writeVideo(const RtcTime& timestamp,
     for (uint32_t i = 0; i < totalFrames; i++) {
         camera_fb_t* fb = esp_camera_fb_get();
         if (!fb) {
-            ESP_LOGE(TAG, "Capture failed at frame %u", i);
+            ESP_LOGE(TAG, "Capture failed at frame %lu", i);
             continue;
         }
         
         char filename[256];
-        snprintf(filename, sizeof(filename), "%s/%04u.jpg", 
+        snprintf(filename, sizeof(filename), "%s/%04lu.jpg", 
                  folderPath.c_str(), i + 1);
         
         FILE* file = fopen(filename, "wb");
@@ -414,14 +418,15 @@ esp_err_t VideoManager::writeVideo(const RtcTime& timestamp,
         vTaskDelay(pdMS_TO_TICKS(delayMs));
     }
     
-    sync();
+   // sync();
     
     videoInfo.folderName = folderName;
     videoInfo.fullPath = folderPath;
     videoInfo.frameCount = frameCount;
     videoInfo.totalSize = totalSize;
     
-    ESP_LOGI(TAG, "Recording completed: %u frames, %u bytes", frameCount, totalSize);
+    ESP_LOGI(TAG, "Recording completed: %lu frames, %lu bytes", frameCount, totalSize);
+
     
     return ESP_OK;
 }
@@ -457,7 +462,7 @@ esp_err_t VideoManager::readVideo(const std::string& folderPath) {
     
     closedir(dir);
     
-    ESP_LOGI(TAG, "Upload completed: %u/%u files", successCount, fileCount);
+    ESP_LOGI(TAG, "Upload completed: %lu/%lu files", successCount, fileCount);
     
     return (successCount == fileCount) ? ESP_OK : ESP_FAIL;
 }
@@ -533,7 +538,7 @@ esp_err_t VideoManager::deleteOldVideos(const RtcTime& currentTime, uint32_t day
     
     closedir(dir);
     
-    ESP_LOGI(TAG, "Deleted %u old folders", deletedCount);
+    ESP_LOGI(TAG, "Deleted %lu old folders", deletedCount);
     return ESP_OK;
 }
 

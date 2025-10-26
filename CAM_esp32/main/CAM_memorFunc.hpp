@@ -8,6 +8,7 @@
 #include <string>
 #include <vector>
 #include <cstdint>
+#include <functional>
 
 // Extension methods cho RtcTime
 namespace RtcTimeUtils {
@@ -48,7 +49,7 @@ public:
     esp_err_t unmount();
     bool isMounted() const { return mounted; }
     
-    esp_err_t getInfo(uint64_t& totalBytes, uint64_t& freeBytes) const;
+   // esp_err_t getInfo(uint64_t& totalBytes, uint64_t& freeBytes) const;
     void printInfo() const;
 };
 
@@ -85,8 +86,8 @@ public:
 
     // Utility functions
     std::vector<VideoInfo> listVideos();
-    bool videoExists(const std::string& folderName) const;
-    std::string getVideoPath(const std::string& folderName) const;
+  //  bool videoExists(const std::string& folderName) const;
+   // std::string getVideoPath(const std::string& folderName) const;
 };
 
 // Video Write Timer Class (PIR-triggered with auto-timeout)
@@ -108,10 +109,12 @@ private:
     
     static void timerCallback(TimerHandle_t xTimer);
     static void writeTaskFunc(void* param);
+    std::function<void(const std::string&)> onVideoComplete;
     
     void onTimeout();
     esp_err_t startWriteTask();
     void stopWriteTask();
+    
     
 public:
     explicit VideoWriteTimer(VideoManager& mgr);
@@ -120,6 +123,9 @@ public:
     // Disable copy
     VideoWriteTimer(const VideoWriteTimer&) = delete;
     VideoWriteTimer& operator=(const VideoWriteTimer&) = delete;
+    void setOnComplete(std::function<void(const std::string&)> callback) {
+        onVideoComplete = callback;
+    }
     
     // Main control functions
     esp_err_t start(const RtcTime& timestamp, uint32_t durationMs, uint8_t fps);
@@ -127,6 +133,12 @@ public:
     esp_err_t stop();
     
     bool isActive() const;
+
 };
+
+
+// videoWriteTimer.setOnComplete([&mqttApi](const std::string& folderName) {
+//     mqttApi.publishFolderName(folderName);
+// });
 
 #endif // CAM_MEMOR_FUNC_HPP

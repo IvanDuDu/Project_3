@@ -64,28 +64,6 @@ esp_err_t camera_init(void) {
 }
 
 
-void turnCameraOn() {
-    camera_fb_t *fb = esp_camera_fb_get();
-    if (!isCameraOn()) {
-        esp_camera_fb_return(fb);
-        
-    }
-}
 
-void turnCameraOff() {
-    camera_fb_t *fb = esp_camera_fb_get();
-    if (isCameraOn()) {
-        esp_camera_fb_return(fb);
-    }
-}
-
-bool isCameraOn() {
-    camera_fb_t *fb = esp_camera_fb_get();
-    if (fb) {
-        esp_camera_fb_return(fb);
-        return true;
-    }
-    return false;
-}
 
 

@@ -28,10 +28,18 @@ bool PirSensor::detectMotion() const {
 // ==================== RTC DS3231 ====================
 
 RtcDS3231::RtcDS3231(gpio_num_t scl, gpio_num_t sda, i2c_port_t port)
-    : i2c_num(port), scl_pin(scl), sda_pin(sda), device_address(0x68) {}
+    : i2c_num(port), scl_pin(scl), sda_pin(sda), device_address(0x68), 
+      bus_handle(nullptr), dev_handle(nullptr) {}
 
 RtcDS3231::~RtcDS3231() {
-    i2c_driver_delete(i2c_num);
+    if (dev_handle != nullptr) {
+        i2c_master_bus_rm_device(dev_handle);
+        dev_handle = nullptr;
+    }
+    if (bus_handle != nullptr) {
+        i2c_del_master_bus(bus_handle);
+        bus_handle = nullptr;
+    }
 }
 
 uint8_t RtcDS3231::bcdToDec(uint8_t val) {
@@ -43,46 +51,51 @@ uint8_t RtcDS3231::decToBcd(uint8_t val) {
 }
 
 esp_err_t RtcDS3231::init() {
-    i2c_config_t conf = {};
-    conf.mode = I2C_MODE_MASTER;
-    conf.sda_io_num = sda_pin;
-    conf.scl_io_num = scl_pin;
-    conf.sda_pullup_en = GPIO_PULLUP_ENABLE;
-    conf.scl_pullup_en = GPIO_PULLUP_ENABLE;
-    conf.master.clk_speed = 100000;
-    conf.clk_flags = 0;
+    // Configure I2C master bus
+    i2c_master_bus_config_t bus_config = {};
+    bus_config.clk_source = I2C_CLK_SRC_DEFAULT;
+    bus_config.i2c_port = i2c_num;
+    bus_config.scl_io_num = scl_pin;
+    bus_config.sda_io_num = sda_pin;
+    bus_config.glitch_ignore_cnt = 7;
+    bus_config.flags.enable_internal_pullup = true;
 
-    esp_err_t ret = i2c_param_config(i2c_num, &conf);
+    esp_err_t ret = i2c_new_master_bus(&bus_config, &bus_handle);
     if (ret != ESP_OK) {
-        ESP_LOGE("RTC", "I2C config failed");
+        ESP_LOGE("RTC", "I2C master bus init failed: %s", esp_err_to_name(ret));
         return ret;
     }
 
-    ret = i2c_driver_install(i2c_num, conf.mode, 0, 0, 0);
-    if (ret == ESP_OK) {
-        ESP_LOGI("RTC", "Initialized (SCL:%d, SDA:%d)", scl_pin, sda_pin);
+    // Add RTC device to the bus
+    i2c_device_config_t dev_config = {};
+    dev_config.dev_addr_length = I2C_ADDR_BIT_LEN_7;
+    dev_config.device_address = device_address;
+    dev_config.scl_speed_hz = 100000;
+
+    ret = i2c_master_bus_add_device(bus_handle, &dev_config, &dev_handle);
+    if (ret != ESP_OK) {
+        ESP_LOGE("RTC", "Failed to add I2C device: %s", esp_err_to_name(ret));
+        i2c_del_master_bus(bus_handle);
+        bus_handle = nullptr;
+        return ret;
     }
-    return ret;
+
+    ESP_LOGI("RTC", "Initialized (SCL:%d, SDA:%d)", scl_pin, sda_pin);
+    return ESP_OK;
 }
 
 esp_err_t RtcDS3231::readTime(RtcTime& time) {
+    uint8_t reg_addr = 0x00;
     uint8_t data[7];
-    i2c_cmd_handle_t cmd = i2c_cmd_link_create();
-    
-    // Write register address
-    i2c_master_start(cmd);
-    i2c_master_write_byte(cmd, (device_address << 1) | I2C_MASTER_WRITE, true);
-    i2c_master_write_byte(cmd, 0x00, true);
-    
-    // Read 7 bytes
-    i2c_master_start(cmd);
-    i2c_master_write_byte(cmd, (device_address << 1) | I2C_MASTER_READ, true);
-    i2c_master_read(cmd, data, 7, I2C_MASTER_LAST_NACK);
-    i2c_master_stop(cmd);
-    
-    esp_err_t ret = i2c_master_cmd_begin(i2c_num, cmd, pdMS_TO_TICKS(1000));
-    i2c_cmd_link_delete(cmd);
-    
+
+    // Write register address then read 7 bytes
+    esp_err_t ret = i2c_master_transmit_receive(
+        dev_handle,
+        &reg_addr, 1,
+        data, 7,
+        1000 / portTICK_PERIOD_MS
+    );
+
     if (ret == ESP_OK) {
         time.second = bcdToDec(data[0] & 0x7F);
         time.minute = bcdToDec(data[1] & 0x7F);
@@ -94,30 +107,35 @@ esp_err_t RtcDS3231::readTime(RtcTime& time) {
         ESP_LOGI("RTC", "%04d-%02d-%02d %02d:%02d:%02d",
                  time.year, time.month, time.day,
                  time.hour, time.minute, time.second);
+    } else {
+        ESP_LOGE("RTC", "Failed to read time: %s", esp_err_to_name(ret));
     }
     
     return ret;
 }
 
 esp_err_t RtcDS3231::setTime(const RtcTime& time) {
-    uint8_t data[7];
-    data[0] = decToBcd(time.second);
-    data[1] = decToBcd(time.minute);
-    data[2] = decToBcd(time.hour);
-    data[3] = 1; // Day of week (not used)
-    data[4] = decToBcd(time.day);
-    data[5] = decToBcd(time.month);
-    data[6] = decToBcd(time.year - 2000);
-    
-    i2c_cmd_handle_t cmd = i2c_cmd_link_create();
-    i2c_master_start(cmd);
-    i2c_master_write_byte(cmd, (device_address << 1) | I2C_MASTER_WRITE, true);
-    i2c_master_write_byte(cmd, 0x00, true);
-    i2c_master_write(cmd, data, 7, true);
-    i2c_master_stop(cmd);
-    
-    esp_err_t ret = i2c_master_cmd_begin(i2c_num, cmd, pdMS_TO_TICKS(1000));
-    i2c_cmd_link_delete(cmd);
+    uint8_t write_buf[8];
+    write_buf[0] = 0x00;  // Register address
+    write_buf[1] = decToBcd(time.second);
+    write_buf[2] = decToBcd(time.minute);
+    write_buf[3] = decToBcd(time.hour);
+    write_buf[4] = 1;  // Day of week (not used)
+    write_buf[5] = decToBcd(time.day);
+    write_buf[6] = decToBcd(time.month);
+    write_buf[7] = decToBcd(time.year - 2000);
+
+    esp_err_t ret = i2c_master_transmit(
+        dev_handle,
+        write_buf, 8,
+        1000 / portTICK_PERIOD_MS
+    );
+
+    if (ret == ESP_OK) {
+        ESP_LOGI("RTC", "Time set successfully");
+    } else {
+        ESP_LOGE("RTC", "Failed to set time: %s", esp_err_to_name(ret));
+    }
     
     return ret;
 }

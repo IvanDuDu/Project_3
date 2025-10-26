@@ -7,10 +7,11 @@ const char* MqttApiManager::TAG = "MQTT_API";
 // Global instance for static callback
 static MqttApiManager* g_mqttApi = nullptr;
 
+
 MqttApiManager::MqttApiManager(HttpStreamManager& stream, VideoManager& video, const std::string& token)
     : streamMgr(stream), videoMgr(video), mqttClient(nullptr), mqttConnected(false),
-      memoryTaskHandle(nullptr), deviceToken(token),
-      streamState(TaskState::IDLE), memoryState(TaskState::IDLE), writeState(TaskState::IDLE) {
+      memoryTaskHandle(nullptr), streamState(TaskState::IDLE), memoryState(TaskState::IDLE), 
+      writeState(TaskState::IDLE), deviceToken(token) {
     
     // Create topics
     topicStreamSub = "api/" + deviceToken + "/cam/stream";
@@ -18,6 +19,8 @@ MqttApiManager::MqttApiManager(HttpStreamManager& stream, VideoManager& video, c
     topicMemorySub = "api/" + deviceToken + "/cam/memory";
     topicMemoryPub = "api/" + deviceToken + "/cam/memory/status";
     topicWiFiPub = "api/" + deviceToken + "/cam/connect/status";
+    topicSendFolderName = "api/" + deviceToken + "/cam/memory/filename";
+
     
     // Create event group
     resourceEventGroup = xEventGroupCreate();
@@ -111,7 +114,7 @@ void MqttApiManager::mqttEventHandler(void* handler_args, esp_event_base_t base,
             ESP_LOGI(TAG, "Subscribed: %s", self->topicMemorySub.c_str());
             
             // Publish initial status
-            self->publishStreamStatus(STATUS_OFF);
+            self->publishStatus(STATUS_OFF, self->topicStreamPub);
             break;
             
         case MQTT_EVENT_DISCONNECTED:
@@ -147,7 +150,7 @@ void MqttApiManager::handleStreamCommand(const std::string& command) {
     
     if (command == CMD_STREAM_ON) {
         if (startStream() != ESP_OK) {
-            publishStreamStatus(STATUS_BUSY);
+            publishStatus(STATUS_BUSY, topicStreamPub);
         }
     } else if (command == CMD_STREAM_OFF) {
         stopStream();
@@ -156,10 +159,12 @@ void MqttApiManager::handleStreamCommand(const std::string& command) {
 
 void MqttApiManager::handleMemoryCommand(const std::string& videoPath) {
     ESP_LOGI(TAG, "Memory command: %s", videoPath.c_str());
-    
+
     if (startMemoryRead(videoPath) != ESP_OK) {
-        publishMemoryStatus(STATUS_BUSY);
+        publishStatus(STATUS_BUSY, topicMemoryPub);
     }
+
+
 }
 
 esp_err_t MqttApiManager::startStream() {
@@ -193,7 +198,7 @@ esp_err_t MqttApiManager::startStream() {
     esp_err_t ret = streamMgr.start();
     
     if (ret == ESP_OK) {
-        publishStreamStatus(CMD_STREAM_ON);
+        publishStatus(CMD_STREAM_ON, topicStreamPub);
         ESP_LOGI(TAG, "Stream started");
     } else {
         if (xSemaphoreTake(resourceMutex, pdMS_TO_TICKS(100)) == pdTRUE) {
@@ -234,7 +239,7 @@ esp_err_t MqttApiManager::stopStream() {
     // Clear resource bit
     xEventGroupClearBits(resourceEventGroup, RESOURCE_STREAM_ACTIVE_BIT);
     
-    publishStreamStatus(STATUS_OFF);
+    publishStatus(STATUS_OFF, topicStreamPub);
     ESP_LOGI(TAG, "Stream stopped");
     
     return ESP_OK;
@@ -248,7 +253,7 @@ esp_err_t MqttApiManager::startMemoryRead(const std::string& videoPath) {
     // Check if stream is running
     if (streamState == TaskState::RUNNING) {
         ESP_LOGW(TAG, "Cannot start memory: stream running");
-        publishStreamStatus(STATUS_OFF);  // Notify stream interrupted
+        publishStatus(STATUS_OFF, topicStreamPub);  // Notify stream interrupted
         xSemaphoreGive(resourceMutex);
         return ESP_ERR_INVALID_STATE;
     }
@@ -261,6 +266,7 @@ esp_err_t MqttApiManager::startMemoryRead(const std::string& videoPath) {
     
     memoryState = TaskState::RUNNING;
     memoryVideoPath = videoPath;
+    
     xSemaphoreGive(resourceMutex);
     
     // Block write task
@@ -289,7 +295,7 @@ esp_err_t MqttApiManager::startMemoryRead(const std::string& videoPath) {
         
         unblockWriteVideo();
         xEventGroupClearBits(resourceEventGroup, RESOURCE_MEMORY_ACTIVE_BIT);
-        publishMemoryStatus(STATUS_FAIL);
+        publishStatus(STATUS_FAIL, topicMemoryPub);
         return ESP_FAIL;
     }
     
@@ -308,10 +314,10 @@ void MqttApiManager::memoryTaskFunc(void* param) {
     
     // Publish result
     if (ret == ESP_OK) {
-        self->publishMemoryStatus(STATUS_OK);
+        self->publishStatus(STATUS_OK, self->topicMemoryPub);
         ESP_LOGI(TAG, "Video upload successful");
     } else {
-        self->publishMemoryStatus(STATUS_FAIL);
+        self->publishStatus(STATUS_FAIL, self->topicMemoryPub);
         ESP_LOGE(TAG, "Video upload failed");
     }
     
@@ -333,39 +339,27 @@ void MqttApiManager::memoryTaskFunc(void* param) {
     vTaskDelete(nullptr);
 }
 
-esp_err_t MqttApiManager::publishStreamStatus(const std::string& status) {
+esp_err_t MqttApiManager::publishStatus(const std::string& status, const std::string& topic) {
     if (!mqttConnected || mqttClient == nullptr) {
         return ESP_ERR_INVALID_STATE;
     }
     
     int msg_id = esp_mqtt_client_publish(mqttClient,
-                                          topicStreamPub.c_str(),
+                                          topic.c_str(),
                                           status.c_str(), 0, 1, 0);
     
     if (msg_id >= 0) {
-        ESP_LOGI(TAG, "Published stream status: %s", status.c_str());
+        ESP_LOGI(TAG, "Published status: %s on topic: %s", status.c_str(), topic.c_str());
         return ESP_OK;
     }
     
     return ESP_FAIL;
 }
 
-esp_err_t MqttApiManager::publishMemoryStatus(const std::string& status) {
-    if (!mqttConnected || mqttClient == nullptr) {
-        return ESP_ERR_INVALID_STATE;
-    }
-    
-    int msg_id = esp_mqtt_client_publish(mqttClient,
-                                          topicMemoryPub.c_str(),
-                                          status.c_str(), 0, 1, 0);
-    
-    if (msg_id >= 0) {
-        ESP_LOGI(TAG, "Published memory status: %s", status.c_str());
-        return ESP_OK;
-    }
-    
-    return ESP_FAIL;
+esp_err_t MqttApiManager::publishFolderName(const std::string& folderName) {
+       return publishStatus(folderName, topicSendFolderName);
 }
+
 
 void MqttApiManager::blockWriteVideo() {
     xEventGroupSetBits(resourceEventGroup, RESOURCE_WRITE_BLOCKED_BIT);
@@ -430,6 +424,7 @@ TaskState MqttApiManager::getStreamState() const {
     if (xSemaphoreTake(resourceMutex, pdMS_TO_TICKS(100)) == pdTRUE) {
         state = streamState;
         xSemaphoreGive(resourceMutex);
+    
     }
     
     return state;
@@ -441,6 +436,7 @@ TaskState MqttApiManager::getMemoryState() const {
     if (xSemaphoreTake(resourceMutex, pdMS_TO_TICKS(100)) == pdTRUE) {
         state = memoryState;
         xSemaphoreGive(resourceMutex);
+    
     }
     
     return state;
@@ -448,11 +444,11 @@ TaskState MqttApiManager::getMemoryState() const {
 
 TaskState MqttApiManager::getWriteState() const {
     TaskState state = TaskState::IDLE;
-    
+
     if (xSemaphoreTake(resourceMutex, pdMS_TO_TICKS(100)) == pdTRUE) {
         state = writeState;
         xSemaphoreGive(resourceMutex);
     }
-    
+
     return state;
 }
